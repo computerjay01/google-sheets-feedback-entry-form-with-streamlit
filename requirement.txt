@@ -1,0 +1,4 @@
+# requirements.txt
+
+streamlit
+st-gsheets-connection
