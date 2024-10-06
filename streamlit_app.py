@@ -1,18 +1,43 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import gspread
+from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import datetime
+
+# Load Google Sheets credentials from secrets.toml
+credentials = {
+    "type": st.secrets["connections"]["gsheets"]["type"],
+    "project_id": st.secrets["connections"]["gsheets"]["project_id"],
+    "private_key_id": st.secrets["connections"]["gsheets"]["private_key_id"],
+    "private_key": st.secrets["connections"]["gsheets"]["private_key"].replace('\\n', '\n'),
+    "client_email": st.secrets["connections"]["gsheets"]["client_email"],
+    "client_id": st.secrets["connections"]["gsheets"]["client_id"],
+    "auth_uri": st.secrets["connections"]["gsheets"]["auth_uri"],
+    "token_uri": st.secrets["connections"]["gsheets"]["token_uri"],
+    "auth_provider_x509_cert_url": st.secrets["connections"]["gsheets"]["auth_provider_x509_cert_url"],
+    "client_x509_cert_url": st.secrets["connections"]["gsheets"]["client_x509_cert_url"]
+}
+
+# Define the scope
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+
+# Authenticate using the service account credentials
+creds = Credentials.from_service_account_info(credentials, scopes=scope)
+client = gspread.authorize(creds)
+
+# Open your Google Sheet
+sheet = client.open_by_url(st.secrets["connections"]["gsheets"]["spreadsheet"]).worksheet("Tenant")  # Replace 'Tenant' with the actual worksheet name
 
 # Display Title and Description
 st.title("Tenant Feedback")
 st.markdown("Provide your thoughts below")
 
-# Establishing a Google Sheets connection
-conn = st.connection("gsheets", type=GSheetsConnection)
-
 # Fetch existing Tenant data (including the newly added row)
-existing_data = conn.read(worksheet="Tenant", usecols=list(range(3)), ttl=5)
-existing_data = existing_data.dropna(how="all")
+existing_data = pd.DataFrame(sheet.get_all_records())
+
+# Display the data in a table
+st.subheader("Existing Feedback")
+st.dataframe(existing_data)
 
 # Form for submitting new feedback
 with st.form(key='feedback_form'):
@@ -33,20 +58,13 @@ if submit_button:
         st.stop()
     else:
         # Create a new row of feedback data
-        feedback_data = pd.DataFrame(
-            [
-                {
-                    "Date": date.strftime("%Y-%m-%d"),  # Format date as YYYY-MM-DD
-                    "Name": name if name else "Anonymous",  # Use 'Anonymous' if name is not provided
-                    "Feedback": comment,
-                }
-            ]
-        )
-
-        # Add the new feedback to the existing data
-        updated_df = pd.concat([existing_data, feedback_data], ignore_index=True)
-
-        # Update Google Sheets with the new feedback data
-        conn.update(worksheet="Tenant", data=updated_df)
-
+        feedback_data = [date.strftime("%Y-%m-%d"), name if name else "Anonymous", comment]
+        
+        # Append the new feedback to Google Sheets
+        sheet.append_row(feedback_data)
+        
         st.success(f"Thank you {name if name else 'Anonymous'}! Your feedback has been submitted.")
+        
+        # Refresh the data after submission
+        existing_data = pd.DataFrame(sheet.get_all_records())
+        st.dataframe(existing_data)
